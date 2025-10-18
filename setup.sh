@@ -17,9 +17,18 @@ fi
 echo "Updating system packages..."
 dnf update -y
 
-# Install Python 3.12
+# Install Python 3.12 and attempt to install pip
 echo "Installing Python 3.12..."
-dnf install -y python3.12 python3.12-pip
+dnf install -y python3.12
+
+# Check if python3.12-pip is available, fallback to get-pip.py if not
+echo "Installing pip for Python 3.12..."
+if ! dnf install -y python3.12-pip --skip-unavailable; then
+  echo "python3.12-pip not available, installing pip via get-pip.py..."
+  curl -fsSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+  python3.12 get-pip.py
+  rm get-pip.py
+fi
 
 # Install dnf-plugins-core for repository management
 echo "Installing dnf-plugins-core..."
@@ -90,7 +99,7 @@ curl -fsSL https://tailscale.com/install.sh | sh
 
 # Start Tailscale with provided auth key
 echo "Starting Tailscale..."
-TAILSCALE_AUTH_KEY="tskey-auth-kQoN4UvGme11CNTRL-ebWa9WfhHuU7QRj3VGXntUdRaYx7Syc2"
+TAILSCALE_AUTH_KEY="tskey-auth-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 tailscale up --authkey="${TAILSCALE_AUTH_KEY}" --accept-routes
 
 # Install Nextcloud Desktop
@@ -116,6 +125,7 @@ dnf install -y cuda cuda-devel cuda-libs xorg-x11-drv-nvidia-cuda
 # Verify installations
 echo "Verifying installations..."
 command -v python3.12 >/dev/null && echo "Python 3.12 installed" || echo "Python 3.12 installation failed"
+command -v pip3.12 >/dev/null && echo "pip for Python 3.12 installed" || echo "pip for Python 3.12 installation failed"
 command -v docker >/dev/null && echo "Docker installed" || echo "Docker installation failed"
 command -v code >/dev/null && echo "Visual Studio Code installed" || echo "VS Code installation failed"
 command -v tailscale >/dev/null && echo "Tailscale installed" || echo "Tailscale installation failed"

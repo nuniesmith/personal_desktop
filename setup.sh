@@ -17,6 +17,10 @@ fi
 echo "Updating system packages..."
 dnf update -y
 
+# Install RPM Fusion non-free repository for NVIDIA packages
+echo "Adding RPM Fusion non-free repository..."
+dnf install -y https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+
 # Install Python 3.12 and attempt to install pip
 echo "Installing Python 3.12..."
 dnf install -y python3.12

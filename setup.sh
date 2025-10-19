@@ -4,9 +4,52 @@
 # Nextcloud Desktop, LibreOffice, htop, CIFS/SMB tools, nonfree NVIDIA driver, and NVIDIA CUDA
 # on Manjaro, Fedora, or Ubuntu. It also configures Docker and adds the target user to the docker group.
 # Additionally, it installs Steam and Wine for gaming purposes.
-# It also sets up a Wine prefix and installs Battle.net using Wine.
+# It also sets up a Wine prefix and installs Battle.net, EA App, and Epic Games Store using Wine.
 # Now with checks to skip already completed tasks.
-# Added EA App installation similarly to Battle.net.
+# Added master boolean flags to enable/disable sections.
+# Added GPU choice: nvidia, amd, intel (set at top, affects driver installation). Now with auto-detection.
+# For interactive mode, you can edit the flags below or run with prompts (basic prompts added).
+# Script broken into phases: Phase 1 (updates, packages, drivers), Phase 2 (gaming setup, extra CUDA).
+
+# Master Boolean Flags (true/false) - Edit these to enable/disable installations
+INSTALL_PYTHON=true
+INSTALL_DOCKER=true
+INSTALL_VSCODE=true
+INSTALL_TAILSCALE=true
+INSTALL_NEXTCLOUD=true
+INSTALL_LIBREOFFICE=true
+INSTALL_HTOP=true
+INSTALL_CIFS=true
+INSTALL_STEAM=true
+INSTALL_WINE=true
+INSTALL_BATTLENET=true
+INSTALL_EA=true
+INSTALL_EPIC=true
+INSTALL_GPU_DRIVERS=true  # If true, installs drivers based on GPU_TYPE
+INSTALL_EXTRA_CUDA=true   # If true and NVIDIA, installs extra like cudnn
+
+# GPU Type: nvidia, amd, intel (lowercase) - Will be auto-detected if not set
+GPU_TYPE=""
+
+# Interactive prompts - If you want to override flags interactively
+echo "Do you want to run in interactive mode? (y/n)"
+read interactive
+if [ "$interactive" = "y" ]; then
+  echo "Install Python? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_PYTHON=true || INSTALL_PYTHON=false
+  echo "Install Docker? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_DOCKER=true || INSTALL_DOCKER=false
+  # Add more prompts as needed...
+  echo "Install Battle.net? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_BATTLENET=true || INSTALL_BATTLENET=false
+  echo "Install EA App? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_EA=true || INSTALL_EA=false
+  echo "Install Epic Games Store? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_EPIC=true || INSTALL_EPIC=false
+  echo "Install extra CUDA packages (if NVIDIA)? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_EXTRA_CUDA=true || INSTALL_EXTRA_CUDA=false
+fi
+
 set -e
 # Detect OS
 if [ -f /etc/os-release ]; then
@@ -59,6 +102,27 @@ run_as_user() {
 user_in_group() {
   groups "$target_user" | grep -q "\b$1\b"
 }
+# Auto-detect GPU if not set
+if [ -z "$GPU_TYPE" ]; then
+  if command -v lspci >/dev/null; then
+    if lspci | grep -i nvidia >/dev/null; then
+      GPU_TYPE="nvidia"
+    elif lspci | grep -i amd | grep -i vga >/dev/null; then
+      GPU_TYPE="amd"
+    elif lspci | grep -i intel | grep -i vga >/dev/null; then
+      GPU_TYPE="intel"
+    else
+      GPU_TYPE="unknown"
+      echo "Could not detect GPU type. Defaulting to no GPU-specific installs."
+    fi
+  else
+    echo "lspci not found. Cannot auto-detect GPU."
+    exit 1
+  fi
+  echo "Detected GPU type: $GPU_TYPE"
+else
+  echo "Using specified GPU type: $GPU_TYPE"
+fi
 # OS-specific commands
 case $OS_FAMILY in
   arch)
@@ -70,11 +134,24 @@ case $OS_FAMILY in
     go_pkg="go"
     python_pkg="python312" # From AUR
     pip_cmd="pip3.12"
-    # For NVIDIA on Arch
-    nvidia_driver_cmd="${priv_cmd}mhwd -a pci nonfree 0300"
-    cuda_pkg="cuda cuda-tools"
+    # For GPU on Arch
+    if [ "$GPU_TYPE" = "nvidia" ]; then
+      nvidia_driver_cmd="${priv_cmd}mhwd -a pci nonfree 0300"
+      cuda_pkg="cuda cuda-tools"  # Base CUDA
+      extra_cuda_pkg="cudnn opencl-nvidia"  # Extra like cudnn
+      libnvidia_container_pkg="libnvidia-container nvidia-container-toolkit"
+    elif [ "$GPU_TYPE" = "amd" ]; then
+      nvidia_driver_cmd="${priv_cmd}mhwd -a pci free 0300"  # Or nonfree if proprietary
+      cuda_pkg=""
+      extra_cuda_pkg=""
+      libnvidia_container_pkg=""
+    elif [ "$GPU_TYPE" = "intel" ]; then
+      nvidia_driver_cmd="${priv_cmd}mhwd -a pci free 0300"
+      cuda_pkg=""
+      extra_cuda_pkg=""
+      libnvidia_container_pkg=""
+    fi
     docker_pkg="docker docker-compose"
-    libnvidia_container_pkg="libnvidia-container nvidia-container-toolkit"
     vscode_pkg="visual-studio-code-bin" # From AUR
     nextcloud_pkg="nextcloud-client"
     libreoffice_pkg="libreoffice-fresh"
@@ -82,7 +159,7 @@ case $OS_FAMILY in
     cifs_pkg="cifs-utils smbclient"
     steam_pkg="steam"
     wine_pkg="wine"
-    winetricks_pkg="winetricks samba"
+    winetricks_pkg="winetricks samba wine-mono wine-gecko"  # Added mono/gecko for Wine issues
     ;;
   fedora)
     update_cmd="${priv_cmd}dnf update -y"
@@ -93,22 +170,38 @@ case $OS_FAMILY in
     go_pkg="golang"
     python_pkg="python3.12"
     pip_cmd="pip3.12"
-    # For NVIDIA on Fedora, add RPM Fusion first
-    function install_nvidia_fedora() {
-      ${priv_cmd}dnf install -y https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
-      ${priv_cmd}dnf update -y
-      ${priv_cmd}dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
+    # For GPU on Fedora
+    function install_gpu_fedora() {
+      if [ "$GPU_TYPE" = "nvidia" ]; then
+        ${priv_cmd}dnf install -y https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+        ${priv_cmd}dnf update -y
+        ${priv_cmd}dnf install -y akmod-nvidia xorg-x11-drv-nvidia-cuda
+      elif [ "$GPU_TYPE" = "amd" ]; then
+        ${priv_cmd}dnf install -y https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
+        ${priv_cmd}dnf update -y
+        ${priv_cmd}dnf install -y akmod-amd-gpu xorg-x11-drv-amdgpu  # Adjust as needed
+      elif [ "$GPU_TYPE" = "intel" ]; then
+        ${priv_cmd}dnf install -y mesa-dri-drivers
+      fi
     }
-    nvidia_driver_cmd="install_nvidia_fedora"
-    cuda_pkg="cuda cuda-devel cuda-libs"
-    docker_pkg="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-    # For NVIDIA Docker on Fedora
-    libnvidia_container_pkg="nvidia-container-toolkit"
+    nvidia_driver_cmd="install_gpu_fedora"
+    if [ "$GPU_TYPE" = "nvidia" ]; then
+      cuda_pkg="cuda cuda-devel cuda-libs"  # Base
+      extra_cuda_pkg="cuda-cudnn cuda-cudnn-devel"  # Extra
+      libnvidia_container_pkg="nvidia-container-toolkit"
+    else
+      cuda_pkg=""
+      extra_cuda_pkg=""
+      libnvidia_container_pkg=""
+    fi
     function install_libnvidia_fedora() {
-      ${priv_cmd}dnf config-manager --add-repo https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
-      ${priv_cmd}dnf install -y nvidia-container-toolkit
+      if [ "$GPU_TYPE" = "nvidia" ]; then
+        ${priv_cmd}dnf config-manager --add-repo https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo
+        ${priv_cmd}dnf install -y nvidia-container-toolkit
+      fi
     }
     libnvidia_install_cmd="install_libnvidia_fedora"
+    docker_pkg="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
     vscode_pkg="code"
     nextcloud_pkg="nextcloud-client"
     libreoffice_pkg="libreoffice"
@@ -116,7 +209,7 @@ case $OS_FAMILY in
     cifs_pkg="cifs-utils samba-client"
     steam_pkg="steam"
     wine_pkg="wine"
-    winetricks_pkg="winetricks samba"
+    winetricks_pkg="winetricks samba wine-mono wine-gecko"  # Added mono/gecko
     ;;
   ubuntu)
     update_cmd="${priv_cmd}apt update && ${priv_cmd}apt upgrade -y"
@@ -125,21 +218,46 @@ case $OS_FAMILY in
     jq_pkg="jq"
     base_devel_pkg="build-essential git"
     go_pkg="golang-go"
-    python_pkg="python3.12 python3.12-venv" # Assume available; add deadsnakes PPA if needed
+    python_pkg="python3.12 python3.12-venv"
     pip_cmd="pip3.12"
-    nvidia_driver_cmd="${priv_cmd}ubuntu-drivers autoinstall"
-    cuda_pkg="cuda-toolkit cuda-tools"
+    # For GPU on Ubuntu
+    if [ "$GPU_TYPE" = "nvidia" ]; then
+      nvidia_driver_cmd="${priv_cmd}ubuntu-drivers autoinstall"
+      cuda_pkg="cuda-toolkit cuda-tools"  # Base
+      extra_cuda_pkg="libcudnn9-cuda-12"  # Extra; assumes repo added
+    elif [ "$GPU_TYPE" = "amd" ]; then
+      nvidia_driver_cmd="${priv_cmd}apt install -y mesa-vulkan-drivers"  # Basic
+      cuda_pkg=""
+      extra_cuda_pkg=""
+    elif [ "$GPU_TYPE" = "intel" ]; then
+      nvidia_driver_cmd="${priv_cmd}apt install -y mesa-vulkan-drivers"
+      cuda_pkg=""
+      extra_cuda_pkg=""
+    fi
     docker_pkg="docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin"
-    libnvidia_container_pkg="nvidia-container-toolkit"
+    if [ "$GPU_TYPE" = "nvidia" ]; then
+      libnvidia_container_pkg="nvidia-container-toolkit"
+    else
+      libnvidia_container_pkg=""
+    fi
     function install_libnvidia_ubuntu() {
-      curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | ${priv_cmd}gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-      curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-        ${priv_cmd}tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-      ${priv_cmd}apt update
-      ${priv_cmd}apt install -y nvidia-container-toolkit
+      if [ "$GPU_TYPE" = "nvidia" ]; then
+        curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | ${priv_cmd}gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+        curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+          sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+          ${priv_cmd}tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+        ${priv_cmd}apt update
+        ${priv_cmd}apt install -y nvidia-container-toolkit
+      fi
     }
     libnvidia_install_cmd="install_libnvidia_ubuntu"
+    function add_cuda_repo_ubuntu() {
+      if [ "$GPU_TYPE" = "nvidia" ]; then
+        wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1-1_all.deb
+        ${priv_cmd}dpkg -i cuda-keyring_1-1_all.deb
+        ${priv_cmd}apt update
+      fi
+    }
     vscode_pkg="code"
     nextcloud_pkg="nextcloud-desktop"
     libreoffice_pkg="libreoffice"
@@ -147,22 +265,21 @@ case $OS_FAMILY in
     cifs_pkg="cifs-utils smbclient"
     steam_pkg="steam"
     wine_pkg="wine"
-    winetricks_pkg="winetricks samba"
+    winetricks_pkg="winetricks samba wine-mono wine-gecko"  # Added mono/gecko
     ;;
 esac
 # Initial checks to see what's already done
 echo "Performing initial checks..."
 has_jq=$(command -v jq >/dev/null && echo "yes" || echo "no")
-# For system update, we always run it
 has_base_devel=$($search_cmd base-devel >/dev/null 2>&1 || $search_cmd dnf-plugins-core >/dev/null 2>&1 || $search_cmd build-essential >/dev/null 2>&1 && echo "yes" || echo "no")
 has_git=$(command -v git >/dev/null && echo "yes" || echo "no")
 has_go=$(command -v go >/dev/null && echo "yes" || echo "no")
 has_python312=$(command -v python3.12 >/dev/null && echo "yes" || echo "no")
 has_pip312=$(command -v $pip_cmd >/dev/null && echo "yes" || echo "no")
-has_nvidia_driver=$(nvidia-smi >/dev/null 2>&1 && echo "yes" || echo "no")
+has_gpu_driver=$(if [ "$GPU_TYPE" = "nvidia" ]; then nvidia-smi >/dev/null 2>&1 && echo "yes" || echo "no"; elif [ "$GPU_TYPE" = "amd" ] || [ "$GPU_TYPE" = "intel" ]; then lspci | grep -i vga >/dev/null && echo "yes" || echo "no"; else echo "no"; fi)
 has_cuda=$(command -v nvcc >/dev/null && echo "yes" || echo "no")
 has_docker=$(command -v docker >/dev/null && echo "yes" || echo "no")
-has_docker_config=$([ -f /etc/docker/daemon.json ] && grep -q "nvidia" /etc/docker/daemon.json && echo "yes" || echo "no")
+has_docker_config=$([ -f /etc/docker/daemon.json ] && grep -q "nvidia" /etc/docker/daemon.json && [ "$GPU_TYPE" = "nvidia" ] && echo "yes" || echo "no")
 has_docker_enabled=$(systemctl is-enabled docker >/dev/null 2>&1 && echo "yes" || echo "no")
 has_docker_group=$(user_in_group docker && echo "yes" || echo "no")
 has_vscode=$(command -v code >/dev/null && echo "yes" || echo "no")
@@ -182,6 +299,10 @@ has_battlenet=$([ -f "/home/$target_user/.wine-battlenet/drive_c/Program Files (
 has_wine_prefix_ea=$([ -d "/home/$target_user/.wine-ea" ] && echo "yes" || echo "no")
 has_ea_installer=$([ -f "/home/$target_user/Downloads/EAappInstaller.exe" ] && echo "yes" || echo "no")
 has_ea=$([ -f "/home/$target_user/.wine-ea/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe" ] && echo "yes" || echo "no")
+has_wine_prefix_epic=$([ -d "/home/$target_user/.wine-epic" ] && echo "yes" || echo "no")
+has_epic_installer=$([ -f "/home/$target_user/Downloads/EpicGamesLauncherInstaller.msi" ] && echo "yes" || echo "no")
+has_epic=$([ -f "/home/$target_user/.wine-epic/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe" ] && echo "yes" || echo "no")
+has_cudnn=$(if [ "$OS_FAMILY" = "arch" ]; then pacman -Qi cudnn >/dev/null 2>&1 && echo "yes" || echo "no"; elif [ "$OS_FAMILY" = "fedora" ]; then rpm -qi cuda-cudnn >/dev/null 2>&1 && echo "yes" || echo "no"; elif [ "$OS_FAMILY" = "ubuntu" ]; then dpkg -s libcudnn9-cuda-12 >/dev/null 2>&1 && echo "yes" || echo "no"; fi)
 # Print status
 echo "Status:"
 echo "jq: $has_jq"
@@ -190,7 +311,7 @@ echo "git: $has_git"
 echo "go: $has_go"
 echo "Python 3.12: $has_python312"
 echo "pip 3.12: $has_pip312"
-echo "NVIDIA driver: $has_nvidia_driver"
+echo "GPU driver: $has_gpu_driver"  # Updated to has_gpu_driver
 echo "CUDA: $has_cuda"
 echo "Docker: $has_docker"
 echo "Docker config: $has_docker_config"
@@ -212,7 +333,12 @@ echo "Battle.net: $has_battlenet"
 echo "Wine prefix EA: $has_wine_prefix_ea"
 echo "EA installer: $has_ea_installer"
 echo "EA App: $has_ea"
-# Now proceed with installations, skipping if already done
+echo "Wine prefix Epic: $has_wine_prefix_epic"
+echo "Epic installer: $has_epic_installer"
+echo "Epic Games Launcher: $has_epic"
+echo "cuDNN: $has_cudnn"
+# Phase 1: Updates, install packages, drivers
+echo "=== Phase 1: System Update, Base Packages, and Drivers ==="
 if [ "$has_jq" = "no" ]; then
   echo "Installing jq..."
   $install_cmd $jq_pkg
@@ -239,7 +365,7 @@ if [ "$OS_FAMILY" = "arch" ]; then
     ${priv_cmd}rm -rf /tmp/yay
   fi
 fi
-if [ "$has_python312" = "no" ]; then
+if [ "$INSTALL_PYTHON" = "true" ] && [ "$has_python312" = "no" ]; then
   if [ "$OS_FAMILY" = "arch" ]; then
     echo "Installing Python 3.12 from AUR..."
     ${priv_cmd}rm -rf /tmp/python312
@@ -252,7 +378,7 @@ if [ "$has_python312" = "no" ]; then
     $install_cmd $python_pkg
   fi
 fi
-if [ "$has_pip312" = "no" ] && [ "$has_python312" = "yes" ]; then
+if [ "$INSTALL_PYTHON" = "true" ] && [ "$has_pip312" = "no" ] && [ "$has_python312" = "yes" ]; then
   echo "Installing pip for Python 3.12..."
   if [ "$OS_FAMILY" = "fedora" ]; then
     if ! $install_cmd python3.12-pip --skip-unavailable; then
@@ -262,15 +388,15 @@ if [ "$has_pip312" = "no" ] && [ "$has_python312" = "yes" ]; then
     run_as_user "python3.12 -m ensurepip || { echo 'ensurepip not available, installing pip via get-pip.py...'; curl -fsSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py; python3.12 get-pip.py; rm get-pip.py; }"
   fi
 fi
-if [ "$has_nvidia_driver" = "no" ]; then
-  echo "Installing nonfree NVIDIA driver..."
+if [ "$INSTALL_GPU_DRIVERS" = "true" ] && [ "$has_gpu_driver" = "no" ]; then
+  echo "Installing GPU driver for $GPU_TYPE..."
   $nvidia_driver_cmd
 fi
-if [ "$has_cuda" = "no" ]; then
-  echo "Installing NVIDIA CUDA..."
+if [ "$INSTALL_GPU_DRIVERS" = "true" ] && [ "$GPU_TYPE" = "nvidia" ] && [ "$has_cuda" = "no" ]; then
+  echo "Installing base NVIDIA CUDA..."
   $install_cmd $cuda_pkg
 fi
-if [ "$has_docker" = "no" ]; then
+if [ "$INSTALL_DOCKER" = "true" ] && [ "$has_docker" = "no" ]; then
   if [ "$OS_FAMILY" = "fedora" ] || [ "$OS_FAMILY" = "ubuntu" ]; then
     # Add Docker repo for Fedora/Ubuntu
     if [ "$OS_FAMILY" = "fedora" ]; then
@@ -285,7 +411,7 @@ gpgkey=https://download.docker.com/linux/fedora/gpg
 EOF
     elif [ "$OS_FAMILY" = "ubuntu" ]; then
       echo "Adding Docker CE repository..."
-      ${priv_cmd}install -y apt-transport-https ca-certificates curl gnupg lsb-release
+      ${priv_cmd}apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
       curl -fsSL https://download.docker.com/linux/ubuntu/gpg | ${priv_cmd}gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
       echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | ${priv_cmd}tee /etc/apt/sources.list.d/docker.list > /dev/null
       ${priv_cmd}apt update
@@ -294,18 +420,17 @@ EOF
   echo "Installing Docker Engine and Compose..."
   $install_cmd $docker_pkg
 fi
-if [ "$has_docker" = "yes" ] && ([ "$OS_FAMILY" = "fedora" ] || [ "$OS_FAMILY" = "ubuntu" ]); then
+if [ "$INSTALL_DOCKER" = "true" ] && [ "$has_docker" = "yes" ] && [ "$GPU_TYPE" = "nvidia" ]; then
   if ! $search_cmd $libnvidia_container_pkg >/dev/null 2>&1; then
     echo "Installing nvidia-container-toolkit..."
-    $libnvidia_install_cmd
-  fi
-elif [ "$OS_FAMILY" = "arch" ] && [ "$has_docker" = "yes" ]; then
-  if ! $search_cmd libnvidia-container >/dev/null 2>&1 || ! $search_cmd nvidia-container-toolkit >/dev/null 2>&1; then
-    echo "Installing libnvidia-container and nvidia-container-toolkit..."
-    $install_cmd $libnvidia_container_pkg
+    if [ "$OS_FAMILY" = "fedora" ] || [ "$OS_FAMILY" = "ubuntu" ]; then
+      $libnvidia_install_cmd
+    else
+      $install_cmd $libnvidia_container_pkg
+    fi
   fi
 fi
-if [ "$has_docker_config" = "no" ]; then
+if [ "$INSTALL_DOCKER" = "true" ] && [ "$has_docker_config" = "no" ] && [ "$GPU_TYPE" = "nvidia" ]; then
   echo "Configuring Docker daemon..."
   ${priv_cmd}mkdir -p /etc/docker
   cat <<EOF | ${priv_cmd}tee /etc/docker/daemon.json
@@ -325,20 +450,20 @@ if [ "$has_docker_config" = "no" ]; then
 }
 EOF
 fi
-if [ "$has_docker" = "yes" ] && [ "$has_docker_enabled" = "no" ]; then
+if [ "$INSTALL_DOCKER" = "true" ] && [ "$has_docker" = "yes" ] && [ "$has_docker_enabled" = "no" ]; then
   echo "Starting and enabling Docker service..."
   ${priv_cmd}systemctl start docker
   ${priv_cmd}systemctl enable docker
 fi
-if [ "$has_docker" = "yes" ]; then
+if [ "$INSTALL_DOCKER" = "true" ] && [ "$has_docker" = "yes" ]; then
   echo "Restarting Docker service..."
   ${priv_cmd}systemctl restart docker
 fi
-if [ "$has_docker_group" = "no" ]; then
+if [ "$INSTALL_DOCKER" = "true" ] && [ "$has_docker_group" = "no" ]; then
   echo "Adding user '$target_user' to docker group..."
   ${priv_cmd}usermod -aG docker "$target_user"
 fi
-if [ "$has_vscode" = "no" ]; then
+if [ "$INSTALL_VSCODE" = "true" ] && [ "$has_vscode" = "no" ]; then
   if [ "$OS_FAMILY" = "arch" ]; then
     echo "Installing Visual Studio Code from AUR..."
     ${priv_cmd}rm -rf /tmp/visual-studio-code-bin
@@ -374,88 +499,120 @@ EOF
     $install_cmd $vscode_pkg
   fi
 fi
-# Tailscale already has its own check
-if [ "$has_tailscale" = "yes" ]; then
-  if [ "$has_tailscale_connected" = "yes" ]; then
-    echo "Tailscale is already installed and connected. Skipping."
+if [ "$INSTALL_TAILSCALE" = "true" ]; then
+  # Tailscale already has its own check
+  if [ "$has_tailscale" = "yes" ]; then
+    if [ "$has_tailscale_connected" = "yes" ]; then
+      echo "Tailscale is already installed and connected. Skipping."
+    else
+      echo "Tailscale is installed but not connected."
+      if [ -z "$TAILSCALE_AUTH_KEY" ]; then
+        read -p "Enter Tailscale auth key: " TAILSCALE_AUTH_KEY
+      fi
+      ${priv_cmd}tailscale up --authkey="${TAILSCALE_AUTH_KEY}" --accept-routes
+    fi
   else
-    echo "Tailscale is installed but not connected."
+    echo "Installing Tailscale..."
+    curl -fsSL https://tailscale.com/install.sh | sh
     if [ -z "$TAILSCALE_AUTH_KEY" ]; then
       read -p "Enter Tailscale auth key: " TAILSCALE_AUTH_KEY
     fi
     ${priv_cmd}tailscale up --authkey="${TAILSCALE_AUTH_KEY}" --accept-routes
   fi
-else
-  echo "Installing Tailscale..."
-  curl -fsSL https://tailscale.com/install.sh | sh
-  if [ -z "$TAILSCALE_AUTH_KEY" ]; then
-    read -p "Enter Tailscale auth key: " TAILSCALE_AUTH_KEY
-  fi
-  ${priv_cmd}tailscale up --authkey="${TAILSCALE_AUTH_KEY}" --accept-routes
 fi
-if [ "$has_nextcloud" = "no" ]; then
+if [ "$INSTALL_NEXTCLOUD" = "true" ] && [ "$has_nextcloud" = "no" ]; then
   echo "Installing Nextcloud Desktop..."
   $install_cmd $nextcloud_pkg
 fi
-if [ "$has_libreoffice" = "no" ]; then
+if [ "$INSTALL_LIBREOFFICE" = "true" ] && [ "$has_libreoffice" = "no" ]; then
   echo "Installing LibreOffice..."
   $install_cmd $libreoffice_pkg
 fi
-if [ "$has_htop" = "no" ]; then
+if [ "$INSTALL_HTOP" = "true" ] && [ "$has_htop" = "no" ]; then
   echo "Installing htop..."
   $install_cmd $htop_pkg
 fi
-if [ "$has_cifs" = "no" ]; then
+if [ "$INSTALL_CIFS" = "true" ] && [ "$has_cifs" = "no" ]; then
   echo "Installing CIFS/SMB tools..."
   $install_cmd $cifs_pkg
 fi
-if [ "$has_steam" = "no" ]; then
+# Phase 2: Gaming setup and extra CUDA
+echo "=== Phase 2: Gaming Setup and Extra CUDA (if NVIDIA) ==="
+if [ "$INSTALL_STEAM" = "true" ] && [ "$has_steam" = "no" ]; then
   echo "Installing Steam..."
   $install_cmd $steam_pkg
 fi
-if [ "$has_wine" = "no" ]; then
+if [ "$INSTALL_WINE" = "true" ] && [ "$has_wine" = "no" ]; then
   echo "Installing Wine..."
   $install_cmd $wine_pkg
 fi
-if [ "$has_winetricks" = "no" ] || [ "$has_samba" = "no" ]; then
+if ([ "$INSTALL_WINE" = "true" ] || [ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]) && ([ "$has_winetricks" = "no" ] || [ "$has_samba" = "no" ]); then
   echo "Installing winetricks and samba..."
   $install_cmd $winetricks_pkg
 fi
+if [ "$INSTALL_EXTRA_CUDA" = "true" ] && [ "$GPU_TYPE" = "nvidia" ] && [ "$has_cudnn" = "no" ]; then
+  if [ "$OS_FAMILY" = "ubuntu" ]; then
+    add_cuda_repo_ubuntu
+  fi
+  echo "Installing extra CUDA packages (e.g., cuDNN)..."
+  $install_cmd $extra_cuda_pkg
+fi
 # Battle.net
-if [ "$has_wine_prefix_bnet" = "no" ]; then
-  echo "Setting up Wine prefix for Battle.net..."
-  run_as_user "mkdir -p ~/.wine-battlenet"
-  run_as_user "WINEPREFIX=~/.wine-battlenet WINEARCH=win64 wineboot --init"
-  run_as_user "WINEPREFIX=~/.wine-battlenet winetricks --unattended win10"
-  run_as_user "WINEPREFIX=~/.wine-battlenet winetricks --unattended corefonts vcrun2019 dotnet48"
-fi
-if [ "$has_battlenet_installer" = "no" ]; then
-  echo "Downloading Battle.net installer..."
-  run_as_user "mkdir -p ~/Downloads"
-  run_as_user "curl -L -o ~/Downloads/Battle.net-Setup.exe 'https://downloader.battle.net/download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live'"
-fi
-if [ "$has_battlenet" = "no" ]; then
-  # Install Battle.net (may require user interaction)
-  echo "Installing Battle.net... This will launch the installer GUI and may require user input."
-  run_as_user "WINEPREFIX=~/.wine-battlenet wine ~/Downloads/Battle.net-Setup.exe"
+if [ "$INSTALL_BATTLENET" = "true" ]; then
+  if [ "$has_wine_prefix_bnet" = "no" ]; then
+    echo "Setting up Wine prefix for Battle.net..."
+    run_as_user "mkdir -p ~/.wine-battlenet"
+    run_as_user "WINEPREFIX=~/.wine-battlenet WINEARCH=win64 wineboot --init"
+    run_as_user "WINEPREFIX=~/.wine-battlenet winetricks --unattended win10"
+    run_as_user "WINEPREFIX=~/.wine-battlenet winetricks --unattended corefonts vcrun2019 dotnet48"
+  fi
+  if [ "$has_battlenet_installer" = "no" ]; then
+    echo "Downloading Battle.net installer..."
+    run_as_user "mkdir -p ~/Downloads"
+    run_as_user "curl -L -o ~/Downloads/Battle.net-Setup.exe 'https://downloader.battle.net/download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live'"
+  fi
+  if [ "$has_battlenet" = "no" ]; then
+    echo "Installing Battle.net... This will launch the installer GUI and may require user input."
+    run_as_user "WINEPREFIX=~/.wine-battlenet wine ~/Downloads/Battle.net-Setup.exe"
+  fi
 fi
 # EA App
-if [ "$has_wine_prefix_ea" = "no" ]; then
-  echo "Setting up Wine prefix for EA App..."
-  run_as_user "mkdir -p ~/.wine-ea"
-  run_as_user "WINEPREFIX=~/.wine-ea WINEARCH=win64 wineboot --init"
-  run_as_user "WINEPREFIX=~/.wine-ea winetricks --unattended win10"
-  run_as_user "WINEPREFIX=~/.wine-ea winetricks --unattended corefonts vcrun2019 dotnet48"
+if [ "$INSTALL_EA" = "true" ]; then
+  if [ "$has_wine_prefix_ea" = "no" ]; then
+    echo "Setting up Wine prefix for EA App..."
+    run_as_user "mkdir -p ~/.wine-ea"
+    run_as_user "WINEPREFIX=~/.wine-ea WINEARCH=win64 wineboot --init"
+    run_as_user "WINEPREFIX=~/.wine-ea winetricks --unattended win10"
+    run_as_user "WINEPREFIX=~/.wine-ea winetricks --unattended corefonts vcrun2019 dotnet48"
+  fi
+  if [ "$has_ea_installer" = "no" ]; then
+    echo "Downloading EA App installer..."
+    run_as_user "mkdir -p ~/Downloads"
+    run_as_user "curl -L -o ~/Downloads/EAappInstaller.exe 'https://origin-a.akamaihd.net/EA-Desktop-Client-Download/installer-releases/EAappInstaller.exe'"
+  fi
+  if [ "$has_ea" = "no" ]; then
+    echo "Installing EA App... This will launch the installer GUI and may require user input."
+    run_as_user "WINEPREFIX=~/.wine-ea wine ~/Downloads/EAappInstaller.exe"
+  fi
 fi
-if [ "$has_ea_installer" = "no" ]; then
-  echo "Downloading EA App installer..."
-  run_as_user "mkdir -p ~/Downloads"
-  run_as_user "curl -L -o ~/Downloads/EAappInstaller.exe 'https://origin-a.akamaihd.net/EA-Desktop-Client-Download/installer-releases/EAappInstaller.exe'"
-fi
-if [ "$has_ea" = "no" ]; then
-  # Install EA App (may require user interaction)
-  echo "Installing EA App... This will launch the installer GUI and may require user input."
-  run_as_user "WINEPREFIX=~/.wine-ea wine ~/Downloads/EAappInstaller.exe"
+# Epic Games Launcher
+if [ "$INSTALL_EPIC" = "true" ]; then
+  if [ "$has_wine_prefix_epic" = "no" ]; then
+    echo "Setting up Wine prefix for Epic Games..."
+    run_as_user "mkdir -p ~/.wine-epic"
+    run_as_user "WINEPREFIX=~/.wine-epic WINEARCH=win64 wineboot --init"
+    run_as_user "WINEPREFIX=~/.wine-epic winetricks --unattended win10"
+    run_as_user "WINEPREFIX=~/.wine-epic winetricks --unattended corefonts vcrun2019 dotnet48"
+  fi
+  if [ "$has_epic_installer" = "no" ]; then
+    echo "Downloading Epic Games installer..."
+    run_as_user "mkdir -p ~/Downloads"
+    run_as_user "curl -L -o ~/Downloads/EpicGamesLauncherInstaller.msi 'https://launcher-public-service-prod06.ol.epicgames.com/launcher/api/installer/download/EpicGamesLauncherInstaller.msi'"
+  fi
+  if [ "$has_epic" = "no" ]; then
+    echo "Installing Epic Games Launcher... This will launch the installer GUI and may require user input."
+    run_as_user "WINEPREFIX=~/.wine-epic wine msiexec /i ~/Downloads/EpicGamesLauncherInstaller.msi"
+  fi
 fi
 # Verify installations
 echo "Verifying installations..."
@@ -469,14 +626,16 @@ command -v libreoffice >/dev/null && echo "LibreOffice installed" || echo "Libre
 command -v htop >/dev/null && echo "htop installed" || echo "htop installation failed"
 command -v smbclient >/dev/null && echo "CIFS/SMB tools installed" || echo "CIFS/SMB tools installation failed"
 command -v nvcc >/dev/null && echo "NVIDIA CUDA installed" || echo "NVIDIA CUDA installation failed"
-nvidia-smi >/dev/null && echo "NVIDIA driver installed" || echo "NVIDIA driver installation failed"
+if [ "$GPU_TYPE" = "nvidia" ]; then nvidia-smi >/dev/null && echo "NVIDIA driver installed" || echo "NVIDIA driver installation failed"; fi
 command -v steam >/dev/null && echo "Steam installed" || echo "Steam installation failed"
 command -v wine >/dev/null && echo "Wine installed" || echo "Wine installation failed"
 [ -f "/home/$target_user/.wine-battlenet/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe" ] && echo "Battle.net installed" || echo "Battle.net installation may have failed (check manually)"
 [ -f "/home/$target_user/.wine-ea/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe" ] && echo "EA App installed" || echo "EA App installation may have failed (check manually)"
+[ -f "/home/$target_user/.wine-epic/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe" ] && echo "Epic Games Launcher installed" || echo "Epic Games Launcher installation may have failed (check manually)"
 echo "Installation and configuration complete!"
 echo "Please log out and log back in for group changes (e.g., docker group) to take effect."
 echo "You may need to reboot for NVIDIA driver changes to take effect."
 echo "To run Battle.net, use: WINEPREFIX=~/.wine-battlenet wine '~/.wine-battlenet/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe'"
 echo "To run EA App, use: WINEPREFIX=~/.wine-ea wine '~/.wine-ea/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe'"
-echo "After installation, you can install games via Battle.net or EA App."
+echo "To run Epic Games Launcher, use: WINEPREFIX=~/.wine-epic wine '~/.wine-epic/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe'"
+echo "After installation, you can install games via Battle.net, EA App, or Epic Games Launcher."

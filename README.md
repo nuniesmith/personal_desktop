@@ -45,8 +45,8 @@ A comprehensive automated setup script for transforming fresh Linux installation
 
 1. **Download the script:**
    ```bash
-   git clone https://github.com/your-username/linux-setup.git
-   cd linux-setup
+   git clone https://github.com/nuniesmith/personal_linux.git
+   cd personal_linux
    chmod +x setup.sh
    ```
 
@@ -110,6 +110,30 @@ After installation, the following launcher scripts are created:
 - **Location**: `~/Desktop/epic-games.sh` and `~/bin/epic-games.sh`
 - **Usage**: `./epic-games.sh` or `epic-games.sh`
 - **Games**: Fortnite, Rocket League, Fall Guys, free weekly games, etc.
+
+### Game Launcher Menu 🎮
+
+A convenient interactive menu to launch all your game clients:
+
+```bash
+~/Desktop/game.sh
+# or simply:
+game
+```
+
+**Quick Launch Commands:**
+```bash
+game battlenet  # Launch Battle.net
+game ea         # Launch EA App
+game epic       # Launch Epic Games
+game steam      # Launch Steam
+game all        # Launch all game clients
+game status     # Check installation status
+game kill       # Stop all game processes
+```
+
+**Interactive Mode:**
+Simply run `game` without arguments to see an interactive menu with all options!
 
 ### Gaming Utilities
 

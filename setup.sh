@@ -741,7 +741,7 @@ pkill -f \"Battle.net\" 2>/dev/null || true
 sleep 2
 
 # Battle.net path
-BATTLENET_LAUNCHER=\"\$WINEPREFIX/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe\"
+BATTLENET_LAUNCHER=\"\$WINEPREFIX/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe\"
 
 if [ ! -f \"\$BATTLENET_LAUNCHER\" ]; then
     echo \"Battle.net not found at: \$BATTLENET_LAUNCHER\"
@@ -779,7 +779,7 @@ pkill -f \"Battle.net\" 2>/dev/null || true
 sleep 2
 
 # Battle.net path
-BATTLENET_LAUNCHER=\"\$WINEPREFIX/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe\"
+BATTLENET_LAUNCHER=\"\$WINEPREFIX/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe\"
 
 if [ ! -f \"\$BATTLENET_LAUNCHER\" ]; then
     echo \"Battle.net not found at: \$BATTLENET_LAUNCHER\"
@@ -985,6 +985,21 @@ EOF"
   run_as_user "chmod +x ~/Desktop/gaming-utils.sh"
   run_as_user "cp ~/Desktop/gaming-utils.sh ~/bin/"
 fi
+
+# Copy the game launcher menu script
+if [ "$INSTALL_PROTON" = "true" ] && ([ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]); then
+  echo "Installing game launcher menu..." | tee -a "$LOG_FILE"
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -f "$script_dir/game.sh" ]; then
+    run_as_user "cp $script_dir/game.sh ~/Desktop/game.sh"
+    run_as_user "chmod +x ~/Desktop/game.sh"
+    run_as_user "cp ~/Desktop/game.sh ~/bin/game"
+    echo "Game launcher menu installed at ~/Desktop/game.sh and ~/bin/game" | tee -a "$LOG_FILE"
+  else
+    echo "Warning: game.sh not found in script directory, skipping game launcher menu installation" | tee -a "$LOG_FILE"
+  fi
+fi
+
 # Verify installations
 echo "Verifying installations..." | tee -a "$LOG_FILE"
 command -v python3.12 >/dev/null && echo "Python 3.12 installed" || echo "Python 3.12 installation failed"

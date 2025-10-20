@@ -3,8 +3,8 @@
 # It installs Python 3.12, Docker Engine with Compose and NVIDIA support, Visual Studio Code, Tailscale,
 # Nextcloud Desktop, LibreOffice, htop, CIFS/SMB tools, nonfree NVIDIA driver, and NVIDIA CUDA
 # on Manjaro, Fedora, Ubuntu, or raw Arch Linux. It also configures Docker and adds the target user to the docker group.
-# Additionally, it installs Steam and Wine for gaming purposes.
-# It also sets up a Wine prefix and installs Battle.net, EA App, and Epic Games Store using Wine.
+# Additionally, it installs Steam and Proton for gaming purposes.
+# It also sets up a Proton prefix and installs Battle.net, EA App, and Epic Games Store using Proton.
 # Now with checks to skip already completed tasks.
 # Added master boolean flags to enable/disable sections.
 # Added GPU choice: nvidia, amd, intel (set at top, affects driver installation). Now with auto-detection.
@@ -23,7 +23,7 @@ INSTALL_LIBREOFFICE=true
 INSTALL_HTOP=true
 INSTALL_CIFS=true
 INSTALL_STEAM=true
-INSTALL_WINE=true
+INSTALL_PROTON=true
 INSTALL_BATTLENET=true
 INSTALL_EA=true
 INSTALL_EPIC=true
@@ -53,13 +53,34 @@ if [ "$interactive" = "y" ]; then
   read ans; [ "$ans" = "y" ] && INSTALL_PYTHON=true || INSTALL_PYTHON=false
   echo "Install Docker? (y/n)"
   read ans; [ "$ans" = "y" ] && INSTALL_DOCKER=true || INSTALL_DOCKER=false
-  # Add more prompts as needed...
-  echo "Install Battle.net? (y/n)"
-  read ans; [ "$ans" = "y" ] && INSTALL_BATTLENET=true || INSTALL_BATTLENET=false
-  echo "Install EA App? (y/n)"
-  read ans; [ "$ans" = "y" ] && INSTALL_EA=true || INSTALL_EA=false
-  echo "Install Epic Games Store? (y/n)"
-  read ans; [ "$ans" = "y" ] && INSTALL_EPIC=true || INSTALL_EPIC=false
+  echo "Install VS Code? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_VSCODE=true || INSTALL_VSCODE=false
+  echo "Install Tailscale? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_TAILSCALE=true || INSTALL_TAILSCALE=false
+  echo "Install Nextcloud Desktop? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_NEXTCLOUD=true || INSTALL_NEXTCLOUD=false
+  echo "Install LibreOffice? (y/n)"
+  read ans; [ "$ans" = "y" ] && INSTALL_LIBREOFFICE=true || INSTALL_LIBREOFFICE=false
+  echo "Install gaming components? (y/n)"
+  read ans
+  if [ "$ans" = "y" ]; then
+    echo "Install Steam? (y/n)"
+    read ans; [ "$ans" = "y" ] && INSTALL_STEAM=true || INSTALL_STEAM=false
+    echo "Install Proton-GE? (y/n)"
+    read ans; [ "$ans" = "y" ] && INSTALL_PROTON=true || INSTALL_PROTON=false
+    echo "Install Battle.net? (y/n)"
+    read ans; [ "$ans" = "y" ] && INSTALL_BATTLENET=true || INSTALL_BATTLENET=false
+    echo "Install EA App? (y/n)"
+    read ans; [ "$ans" = "y" ] && INSTALL_EA=true || INSTALL_EA=false
+    echo "Install Epic Games Store? (y/n)"
+    read ans; [ "$ans" = "y" ] && INSTALL_EPIC=true || INSTALL_EPIC=false
+  else
+    INSTALL_STEAM=false
+    INSTALL_PROTON=false
+    INSTALL_BATTLENET=false
+    INSTALL_EA=false
+    INSTALL_EPIC=false
+  fi
   echo "Install extra CUDA packages (if NVIDIA)? (y/n)"
   read ans; [ "$ans" = "y" ] && INSTALL_EXTRA_CUDA=true || INSTALL_EXTRA_CUDA=false
 fi
@@ -70,7 +91,7 @@ if [ "$COMPUTER_TYPE" = "server" ]; then
   INSTALL_NEXTCLOUD=false
   INSTALL_LIBREOFFICE=false
   INSTALL_STEAM=false
-  INSTALL_WINE=false
+  INSTALL_PROTON=false
   INSTALL_BATTLENET=false
   INSTALL_EA=false
   INSTALL_EPIC=false
@@ -185,8 +206,7 @@ case $OS_FAMILY in
     htop_pkg="htop"
     cifs_pkg="cifs-utils smbclient"
     steam_pkg="steam"
-    wine_pkg="wine"
-    winetricks_pkg="winetricks samba wine-mono wine-gecko"  # Added mono/gecko for Wine issues
+    winetricks_pkg="winetricks samba"  # Removed wine-mono wine-gecko
     gnome_pkg="gnome gnome-tweaks gdm"  # For raw Arch workstation
     ;;
   fedora)
@@ -236,8 +256,7 @@ case $OS_FAMILY in
     htop_pkg="htop"
     cifs_pkg="cifs-utils samba-client"
     steam_pkg="steam"
-    wine_pkg="wine"
-    winetricks_pkg="winetricks samba wine-mono wine-gecko"  # Added mono/gecko
+    winetricks_pkg="winetricks samba"  # Removed wine-mono wine-gecko
     gnome_pkg="gnome-desktop gnome-tweaks gdm"  # For Fedora workstation, but usually pre-installed
     ;;
   ubuntu)
@@ -293,8 +312,7 @@ case $OS_FAMILY in
     htop_pkg="htop"
     cifs_pkg="cifs-utils smbclient"
     steam_pkg="steam"
-    wine_pkg="wine"
-    winetricks_pkg="winetricks samba wine-mono wine-gecko"  # Added mono/gecko
+    winetricks_pkg="winetricks samba"  # Removed wine-mono wine-gecko
     gnome_pkg="gnome gnome-tweaks gdm3"  # For Ubuntu workstation, but usually pre-installed
     ;;
 esac
@@ -320,18 +338,18 @@ has_libreoffice=$(command -v libreoffice >/dev/null && echo "yes" || echo "no")
 has_htop=$(command -v htop >/dev/null && echo "yes" || echo "no")
 has_cifs=$(command -v smbclient >/dev/null && echo "yes" || echo "no")
 has_steam=$(command -v steam >/dev/null && echo "yes" || echo "no")
-has_wine=$(command -v wine >/dev/null && echo "yes" || echo "no")
+has_proton=$([ -f "/home/$target_user/.proton/current/proton" ] && echo "yes" || echo "no")
 has_winetricks=$(command -v winetricks >/dev/null && echo "yes" || echo "no")
 has_samba=$($search_cmd samba >/dev/null 2>&1 && echo "yes" || echo "no")
 has_wine_prefix_bnet=$([ -d "/home/$target_user/.wine-battlenet" ] && echo "yes" || echo "no")
 has_battlenet_installer=$([ -f "/home/$target_user/Downloads/Battle.net-Setup.exe" ] && echo "yes" || echo "no")
-has_battlenet=$([ -f "/home/$target_user/.wine-battlenet/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe" ] && echo "yes" || echo "no")
+has_battlenet=$([ -f "/home/$target_user/.wine-battlenet/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe" ] && echo "yes" || echo "no")
 has_wine_prefix_ea=$([ -d "/home/$target_user/.wine-ea" ] && echo "yes" || echo "no")
 has_ea_installer=$([ -f "/home/$target_user/Downloads/EAappInstaller.exe" ] && echo "yes" || echo "no")
-has_ea=$([ -f "/home/$target_user/.wine-ea/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe" ] && echo "yes" || echo "no")
+has_ea=$([ -f "/home/$target_user/.wine-ea/pfx/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe" ] && echo "yes" || echo "no")
 has_wine_prefix_epic=$([ -d "/home/$target_user/.wine-epic" ] && echo "yes" || echo "no")
 has_epic_installer=$([ -f "/home/$target_user/Downloads/EpicGamesLauncherInstaller.msi" ] && echo "yes" || echo "no")
-has_epic=$([ -f "/home/$target_user/.wine-epic/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe" ] && echo "yes" || echo "no")
+has_epic=$([ -f "/home/$target_user/.wine-epic/pfx/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win32/EpicGamesLauncher.exe" ] && echo "yes" || echo "no")
 has_cudnn=$(if [ "$OS_FAMILY" = "arch" ] || [ "$OS_FAMILY" = "arch_raw" ]; then pacman -Qi cudnn >/dev/null 2>&1 && echo "yes" || echo "no"; elif [ "$OS_FAMILY" = "fedora" ]; then rpm -qi cuda-cudnn >/dev/null 2>&1 && echo "yes" || echo "no"; elif [ "$OS_FAMILY" = "ubuntu" ]; then dpkg -s libcudnn9-cuda-12 >/dev/null 2>&1 && echo "yes" || echo "no"; fi)
 has_gnome=$(command -v gnome-shell >/dev/null && echo "yes" || echo "no")
 # Print status
@@ -355,7 +373,7 @@ echo "LibreOffice: $has_libreoffice"
 echo "htop: $has_htop"
 echo "CIFS/SMB: $has_cifs"
 echo "Steam: $has_steam"
-echo "Wine: $has_wine"
+echo "Proton: $has_proton"
 echo "Winetricks: $has_winetricks"
 echo "Samba: $has_samba"
 echo "Wine prefix Battle.net: $has_wine_prefix_bnet"
@@ -579,11 +597,23 @@ if [ "$INSTALL_STEAM" = "true" ] && [ "$has_steam" = "no" ]; then
   echo "Installing Steam..." | tee -a "$LOG_FILE"
   $install_cmd $steam_pkg || { echo "Failed to install Steam" >> "$LOG_FILE"; exit 1; }
 fi
-if [ "$INSTALL_WINE" = "true" ] && [ "$has_wine" = "no" ]; then
-  echo "Installing Wine..." | tee -a "$LOG_FILE"
-  $install_cmd $wine_pkg || { echo "Failed to install Wine" >> "$LOG_FILE"; exit 1; }
+if [ "$INSTALL_PROTON" = "true" ] && [ "$has_proton" = "no" ]; then
+  echo "Installing Proton-GE..." | tee -a "$LOG_FILE"
+  run_as_user "mkdir -p ~/.proton"
+  latest_release=$(run_as_user "curl -s https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest")
+  asset_url=$(echo "$latest_release" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) .browser_download_url')
+  asset_name=$(echo "$latest_release" | jq -r '.assets[] | select(.name | endswith(".tar.gz")) .name')
+  if [ -z "$asset_url" ]; then
+    echo "Failed to find Proton-GE tar.gz asset URL" >> "$LOG_FILE"
+    exit 1
+  fi
+  run_as_user "curl -L -o ~/.proton/$asset_name $asset_url"
+  run_as_user "tar -xzf ~/.proton/$asset_name -C ~/.proton"
+  run_as_user "rm ~/.proton/$asset_name"
+  folder_name="${asset_name%.tar.gz}"
+  run_as_user "ln -s $folder_name ~/.proton/current"
 fi
-if ([ "$INSTALL_WINE" = "true" ] || [ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]) && ([ "$has_winetricks" = "no" ] || [ "$has_samba" = "no" ]); then
+if ([ "$INSTALL_PROTON" = "true" ] || [ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]) && ([ "$has_winetricks" = "no" ] || [ "$has_samba" = "no" ]); then
   echo "Installing winetricks and samba..." | tee -a "$LOG_FILE"
   $install_cmd $winetricks_pkg || { echo "Failed to install winetricks/samba" >> "$LOG_FILE"; exit 1; }
 fi
@@ -594,14 +624,28 @@ if [ "$INSTALL_EXTRA_CUDA" = "true" ] && [ "$GPU_TYPE" = "nvidia" ] && [ "$has_c
   echo "Installing extra CUDA packages (e.g., cuDNN)..." | tee -a "$LOG_FILE"
   $install_cmd $extra_cuda_pkg || { echo "Failed to install extra CUDA" >> "$LOG_FILE"; exit 1; }
 fi
+
+# Set Proton paths if needed
+if [ "$INSTALL_PROTON" = "true" ] || [ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]; then
+  proton_root="/home/${target_user}/.proton"
+  proton_dir="${proton_root}/current"
+  wine_cmd="${proton_dir}/proton run"
+  wineboot_cmd="${proton_dir}/proton run"
+fi
+
 # Battle.net
 if [ "$INSTALL_BATTLENET" = "true" ]; then
   if [ "$has_wine_prefix_bnet" = "no" ]; then
-    echo "Setting up Wine prefix for Battle.net..." | tee -a "$LOG_FILE"
+    echo "Setting up Proton prefix for Battle.net..." | tee -a "$LOG_FILE"
     run_as_user "mkdir -p ~/.wine-battlenet"
-    run_as_user "WINEPREFIX=~/.wine-battlenet WINEARCH=win64 wineboot --init"
-    run_as_user "WINEPREFIX=~/.wine-battlenet winetricks --unattended win10"
-    run_as_user "WINEPREFIX=~/.wine-battlenet winetricks --unattended corefonts vcrun2019 dotnet48"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-battlenet WINEPREFIX=~/.wine-battlenet ${proton_dir}/proton run wineboot --init"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-battlenet WINEPREFIX=~/.wine-battlenet ${proton_dir}/proton run winetricks --unattended win10"
+    # Install essential components for Battle.net
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-battlenet WINEPREFIX=~/.wine-battlenet ${proton_dir}/proton run winetricks --unattended corefonts vcrun2019 vcrun2022 dotnet48"
+    # Install additional components that help with display issues
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-battlenet WINEPREFIX=~/.wine-battlenet ${proton_dir}/proton run winetricks --unattended d3dx9 d3dx11_43 dxvk"
+    # Battle.net specific registry fixes
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-battlenet WINEPREFIX=~/.wine-battlenet ${proton_dir}/proton run winecfg -v win10"
   fi
   if [ "$has_battlenet_installer" = "no" ]; then
     echo "Downloading Battle.net installer..." | tee -a "$LOG_FILE"
@@ -611,17 +655,19 @@ if [ "$INSTALL_BATTLENET" = "true" ]; then
   fi
   if [ "$has_battlenet" = "no" ]; then
     echo "Installing Battle.net... This will launch the installer GUI and may require user input." | tee -a "$LOG_FILE"
-    run_as_user "WINEPREFIX=~/.wine-battlenet wine ~/Downloads/Battle.net-Setup.exe"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-battlenet WINEPREFIX=~/.wine-battlenet ${wine_cmd} ~/Downloads/Battle.net-Setup.exe"
   fi
 fi
 # EA App
 if [ "$INSTALL_EA" = "true" ]; then
   if [ "$has_wine_prefix_ea" = "no" ]; then
-    echo "Setting up Wine prefix for EA App..." | tee -a "$LOG_FILE"
+    echo "Setting up Proton prefix for EA App..." | tee -a "$LOG_FILE"
     run_as_user "mkdir -p ~/.wine-ea"
-    run_as_user "WINEPREFIX=~/.wine-ea WINEARCH=win64 wineboot --init"
-    run_as_user "WINEPREFIX=~/.wine-ea winetricks --unattended win10"
-    run_as_user "WINEPREFIX=~/.wine-ea winetricks --unattended corefonts vcrun2019 dotnet48"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-ea WINEPREFIX=~/.wine-ea ${proton_dir}/proton run wineboot --init"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-ea WINEPREFIX=~/.wine-ea ${proton_dir}/proton run winetricks --unattended win10"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-ea WINEPREFIX=~/.wine-ea ${proton_dir}/proton run winetricks --unattended corefonts vcrun2019 dotnet48 dxvk webview2"
+    # EA App specific fixes
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-ea WINEPREFIX=~/.wine-ea ${proton_dir}/proton run winecfg -v win10"
   fi
   if [ "$has_ea_installer" = "no" ]; then
     echo "Downloading EA App installer..." | tee -a "$LOG_FILE"
@@ -631,17 +677,19 @@ if [ "$INSTALL_EA" = "true" ]; then
   fi
   if [ "$has_ea" = "no" ]; then
     echo "Installing EA App... This will launch the installer GUI and may require user input." | tee -a "$LOG_FILE"
-    run_as_user "WINEPREFIX=~/.wine-ea wine ~/Downloads/EAappInstaller.exe"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-ea WINEPREFIX=~/.wine-ea ${wine_cmd} ~/Downloads/EAappInstaller.exe"
   fi
 fi
 # Epic Games Launcher
 if [ "$INSTALL_EPIC" = "true" ]; then
   if [ "$has_wine_prefix_epic" = "no" ]; then
-    echo "Setting up Wine prefix for Epic Games..." | tee -a "$LOG_FILE"
+    echo "Setting up Proton prefix for Epic Games..." | tee -a "$LOG_FILE"
     run_as_user "mkdir -p ~/.wine-epic"
-    run_as_user "WINEPREFIX=~/.wine-epic WINEARCH=win64 wineboot --init"
-    run_as_user "WINEPREFIX=~/.wine-epic winetricks --unattended win10"
-    run_as_user "WINEPREFIX=~/.wine-epic winetricks --unattended corefonts vcrun2019 dotnet48"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-epic WINEPREFIX=~/.wine-epic ${proton_dir}/proton run wineboot --init"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-epic WINEPREFIX=~/.wine-epic ${proton_dir}/proton run winetricks --unattended win10"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-epic WINEPREFIX=~/.wine-epic ${proton_dir}/proton run winetricks --unattended corefonts vcrun2019 dotnet48 dotnetdesktop6 dxvk"
+    # Epic Games specific fixes  
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-epic WINEPREFIX=~/.wine-epic ${proton_dir}/proton run winecfg -v win10"
   fi
   if [ "$has_epic_installer" = "no" ]; then
     echo "Downloading Epic Games installer..." | tee -a "$LOG_FILE"
@@ -651,8 +699,291 @@ if [ "$INSTALL_EPIC" = "true" ]; then
   fi
   if [ "$has_epic" = "no" ]; then
     echo "Installing Epic Games Launcher... This will launch the installer GUI and may require user input." | tee -a "$LOG_FILE"
-    run_as_user "WINEPREFIX=~/.wine-epic wine msiexec /i ~/Downloads/EpicGamesLauncherInstaller.msi"
+    run_as_user "STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-epic WINEPREFIX=~/.wine-epic ${wine_cmd} msiexec /i ~/Downloads/EpicGamesLauncherInstaller.msi"
   fi
+fi
+
+# Create launcher scripts for easier access
+if [ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]; then
+  echo "Creating launcher scripts..." | tee -a "$LOG_FILE"
+  run_as_user "mkdir -p ~/Desktop ~/bin"
+fi
+
+if [ "$INSTALL_BATTLENET" = "true" ]; then
+  echo "Creating Battle.net launcher script..." | tee -a "$LOG_FILE"
+  run_as_user "cat > ~/Desktop/battlenet.sh << 'EOF'
+#!/bin/bash
+# Battle.net Launcher Script with enhanced compatibility fixes
+
+export STEAM_COMPAT_CLIENT_INSTALL_PATH=\"\$HOME/.steam\"
+export STEAM_COMPAT_DATA_PATH=\"\$HOME/.wine-battlenet\"
+export WINEPREFIX=\"\$HOME/.wine-battlenet/pfx\"
+
+# Battle.net specific compatibility settings
+export PROTON_USE_WINED3D=1      # Force software renderer
+export PROTON_NO_ESYNC=1         # Disable esync for stability
+export PROTON_NO_FSYNC=1         # Disable fsync for compatibility
+export PROTON_FORCE_LARGE_ADDRESS_AWARE=1  # Memory fix
+export PROTON_OLD_GL_STRING=1    # OpenGL compatibility
+export PROTON_HIDE_NVIDIA_GPU=0  # Don't hide GPU info
+export PROTON_LOG=1              # Enable logging for debugging
+
+# Wine-specific display fixes
+export WINEDLLOVERRIDES=\"winemenubuilder.exe=d;mscoree=d;mshtml=d\"
+
+echo \"Starting Battle.net with compatibility mode...\"
+echo \"If you see display issues, try killing and restarting.\"
+
+cd \"\$HOME/.proton/current\"
+
+# Try to kill any existing Battle.net processes first
+pkill -f \"Battle.net\" 2>/dev/null || true
+sleep 2
+
+# Battle.net path
+BATTLENET_LAUNCHER=\"\$WINEPREFIX/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe\"
+
+if [ ! -f \"\$BATTLENET_LAUNCHER\" ]; then
+    echo \"Battle.net not found at: \$BATTLENET_LAUNCHER\"
+    exit 1
+fi
+
+# Launch Battle.net
+\$HOME/.proton/current/files/bin/wine \"\$BATTLENET_LAUNCHER\"
+EOF"
+  run_as_user "chmod +x ~/Desktop/battlenet.sh"
+  run_as_user "cp ~/Desktop/battlenet.sh ~/bin/"
+  
+  # Create an alternative Battle.net launcher with different settings
+  run_as_user "cat > ~/Desktop/battlenet-alt.sh << 'EOF'
+#!/bin/bash
+# Battle.net Alternative Launcher (DXVK mode)
+
+export STEAM_COMPAT_CLIENT_INSTALL_PATH=\"\$HOME/.steam\"
+export STEAM_COMPAT_DATA_PATH=\"\$HOME/.wine-battlenet\"
+export WINEPREFIX=\"\$HOME/.wine-battlenet/pfx\"
+
+# Alternative settings - use DXVK instead of wined3d
+export PROTON_USE_WINED3D=0      # Use DXVK renderer
+export PROTON_NO_ESYNC=1         # Disable esync for stability
+export PROTON_NO_FSYNC=1         # Disable fsync for compatibility
+export DXVK_HUD=fps              # Show FPS counter
+export PROTON_LOG=1              # Enable logging
+
+echo \"Starting Battle.net with DXVK renderer...\"
+
+cd \"\$HOME/.proton/current\"
+
+# Kill existing processes
+pkill -f \"Battle.net\" 2>/dev/null || true
+sleep 2
+
+# Battle.net path
+BATTLENET_LAUNCHER=\"\$WINEPREFIX/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe\"
+
+if [ ! -f \"\$BATTLENET_LAUNCHER\" ]; then
+    echo \"Battle.net not found at: \$BATTLENET_LAUNCHER\"
+    exit 1
+fi
+
+\$HOME/.proton/current/files/bin/wine \"\$BATTLENET_LAUNCHER\"
+EOF"
+  run_as_user "chmod +x ~/Desktop/battlenet-alt.sh"
+fi
+
+if [ "$INSTALL_EA" = "true" ]; then
+  echo "Creating EA App launcher script..." | tee -a "$LOG_FILE"
+  run_as_user "cat > ~/Desktop/ea-app.sh << 'EOF'
+#!/bin/bash
+echo "Starting EA App..."
+
+# Set environment variables
+export STEAM_COMPAT_CLIENT_INSTALL_PATH=\"\$HOME/.steam\"
+export STEAM_COMPAT_DATA_PATH=\"\$HOME/.wine-ea\"
+export WINEPREFIX=\"\$HOME/.wine-ea/pfx\"
+
+# EA App specific fixes
+export PROTON_NO_ESYNC=1     # Disable esync for stability
+export PROTON_NO_FSYNC=1     # Disable fsync for compatibility
+export PROTON_USE_WINED3D=1  # Use software rendering for compatibility
+
+# EA App path
+EA_LAUNCHER=\"\$HOME/.wine-ea/pfx/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe\"
+
+if [ ! -f \"\$EA_LAUNCHER\" ]; then
+    echo \"EA App not found at: \$EA_LAUNCHER\"
+    exit 1
+fi
+
+\$HOME/.proton/current/files/bin/wine \"\$EA_LAUNCHER\"
+EOF"
+  run_as_user "chmod +x ~/Desktop/ea-app.sh"
+  run_as_user "cp ~/Desktop/ea-app.sh ~/bin/"
+fi
+
+if [ "$INSTALL_EPIC" = "true" ]; then
+  echo "Creating Epic Games launcher script..." | tee -a "$LOG_FILE"
+  run_as_user "cat > ~/Desktop/epic-games.sh << 'EOF'
+#!/bin/bash
+echo "Starting Epic Games Launcher..."
+
+# Set environment variables
+export STEAM_COMPAT_CLIENT_INSTALL_PATH=\"\$HOME/.steam\"
+export STEAM_COMPAT_DATA_PATH=\"\$HOME/.wine-epic\"
+export WINEPREFIX=\"\$HOME/.wine-epic/pfx\"
+
+# Force software rendering to avoid OpenGL issues
+export PROTON_USE_WINED3D=1
+export PROTON_NO_ESYNC=1
+export PROTON_NO_FSYNC=1
+
+# Epic Games Launcher path
+EPIC_LAUNCHER=\"\$HOME/.wine-epic/pfx/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win32/EpicGamesLauncher.exe\"
+
+if [ ! -f \"\$EPIC_LAUNCHER\" ]; then
+    echo "Epic Games Launcher not found at: \$EPIC_LAUNCHER"
+    exit 1
+fi
+
+\$HOME/.proton/current/files/bin/wine \"\$EPIC_LAUNCHER\"
+EOF"
+  run_as_user "chmod +x ~/Desktop/epic-games.sh"
+  run_as_user "cp ~/Desktop/epic-games.sh ~/bin/"
+fi
+
+# Create a general gaming utilities script
+if [ "$INSTALL_PROTON" = "true" ] && ([ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]); then
+  echo "Creating gaming utilities script..." | tee -a "$LOG_FILE"
+  run_as_user "cat > ~/Desktop/gaming-utils.sh << 'EOF'
+#!/bin/bash
+# Gaming Utilities Script for Wine/Proton Management
+
+PROTON_DIR=\"\$HOME/.proton/current\"
+
+show_help() {
+    echo \"Gaming Utilities - Wine/Proton Helper\"
+    echo \"Usage: \$0 [command] [launcher]\"
+    echo \"\"
+    echo \"Commands:\"
+    echo \"  launch [battlenet|ea|epic]  - Launch game client\"
+    echo \"  config [battlenet|ea|epic]  - Open Wine configuration\"
+    echo \"  kill [battlenet|ea|epic]    - Kill all processes for launcher\"
+    echo \"  logs [battlenet|ea|epic]    - Show recent Proton logs\"
+    echo \"  winetricks [launcher]       - Run winetricks for launcher\"
+    echo \"  reset [battlenet|ea|epic]   - Reset Wine prefix (WARNING: removes all data)\"
+    echo \"  help                        - Show this help\"
+    echo \"\"
+    echo \"Examples:\"
+    echo \"  \$0 launch battlenet\"
+    echo \"  \$0 config ea\"
+    echo \"  \$0 winetricks epic\"
+}
+
+get_prefix() {
+    case \$1 in
+        battlenet) echo \"\$HOME/.wine-battlenet\" ;;
+        ea) echo \"\$HOME/.wine-ea\" ;;
+        epic) echo \"\$HOME/.wine-epic\" ;;
+        *) echo \"Unknown launcher: \$1\" >&2; exit 1 ;;
+    esac
+}
+
+launch_client() {
+    launcher=\$1
+    prefix=\$(get_prefix \$launcher)
+    
+    export STEAM_COMPAT_CLIENT_INSTALL_PATH=\"\$HOME/.steam\"
+    export STEAM_COMPAT_DATA_PATH=\"\$prefix\"
+    export WINEPREFIX=\"\$prefix\"
+    export PROTON_NO_ESYNC=1
+    export PROTON_NO_FSYNC=1
+    
+    case \$launcher in
+        battlenet)
+            export PROTON_USE_WINED3D=1
+            cd \"\$PROTON_DIR\"
+            ./proton run \"\$prefix/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe\"
+            ;;
+        ea)
+            export PROTON_LOG=1
+            cd \"\$PROTON_DIR\"
+            ./proton run \"\$prefix/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe\"
+            ;;
+        epic)
+            export PROTON_USE_WINED3D=1
+            cd \"\$PROTON_DIR\"
+            ./proton run \"\$prefix/pfx/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win32/EpicGamesLauncher.exe\"
+            ;;
+    esac
+}
+
+config_wine() {
+    launcher=\$1
+    prefix=\$(get_prefix \$launcher)
+    
+    export STEAM_COMPAT_CLIENT_INSTALL_PATH=\"\$HOME/.steam\"
+    export STEAM_COMPAT_DATA_PATH=\"\$prefix\"
+    export WINEPREFIX=\"\$prefix\"
+    
+    cd \"\$PROTON_DIR\"
+    ./proton run winecfg
+}
+
+kill_processes() {
+    launcher=\$1
+    case \$launcher in
+        battlenet) pkill -f \"Battle.net\" ;;
+        ea) pkill -f \"EADesktop\\|EABackgroundService\" ;;
+        epic) pkill -f \"EpicGamesLauncher\\|Epic\" ;;
+    esac
+}
+
+show_logs() {
+    launcher=\$1
+    echo \"Recent Proton logs for \$launcher:\"
+    find \$HOME -name \"steam-*.log\" -mtime -1 -exec tail -20 {} \\; 2>/dev/null
+}
+
+run_winetricks() {
+    launcher=\$1
+    prefix=\$(get_prefix \$launcher)
+    
+    export STEAM_COMPAT_CLIENT_INSTALL_PATH=\"\$HOME/.steam\"
+    export STEAM_COMPAT_DATA_PATH=\"\$prefix\"
+    export WINEPREFIX=\"\$prefix\"
+    
+    cd \"\$PROTON_DIR\"
+    ./proton run winetricks
+}
+
+reset_prefix() {
+    launcher=\$1
+    prefix=\$(get_prefix \$launcher)
+    
+    echo \"WARNING: This will completely reset the Wine prefix for \$launcher\"
+    echo \"All installed games and settings will be lost!\"
+    read -p \"Are you sure? (yes/no): \" confirm
+    
+    if [ \"\$confirm\" = \"yes\" ]; then
+        rm -rf \"\$prefix\"
+        echo \"Prefix reset. Run the setup script again to reinstall \$launcher.\"
+    else
+        echo \"Reset cancelled.\"
+    fi
+}
+
+case \$1 in
+    launch) launch_client \$2 ;;
+    config) config_wine \$2 ;;
+    kill) kill_processes \$2 ;;
+    logs) show_logs \$2 ;;
+    winetricks) run_winetricks \$2 ;;
+    reset) reset_prefix \$2 ;;
+    help|*) show_help ;;
+esac
+EOF"
+  run_as_user "chmod +x ~/Desktop/gaming-utils.sh"
+  run_as_user "cp ~/Desktop/gaming-utils.sh ~/bin/"
 fi
 # Verify installations
 echo "Verifying installations..." | tee -a "$LOG_FILE"
@@ -668,15 +999,40 @@ command -v smbclient >/dev/null && echo "CIFS/SMB tools installed" || echo "CIFS
 command -v nvcc >/dev/null && echo "NVIDIA CUDA installed" || echo "NVIDIA CUDA installation failed"
 if [ "$GPU_TYPE" = "nvidia" ]; then nvidia-smi >/dev/null && echo "NVIDIA driver installed" || echo "NVIDIA driver installation failed"; fi
 command -v steam >/dev/null && echo "Steam installed" || echo "Steam installation failed"
-command -v wine >/dev/null && echo "Wine installed" || echo "Wine installation failed"
-[ -f "/home/$target_user/.wine-battlenet/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe" ] && echo "Battle.net installed" || echo "Battle.net installation may have failed (check manually)"
-[ -f "/home/$target_user/.wine-ea/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe" ] && echo "EA App installed" || echo "EA App installation may have failed (check manually)"
-[ -f "/home/$target_user/.wine-epic/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe" ] && echo "Epic Games Launcher installed" || echo "Epic Games Launcher installation may have failed (check manually)"
+[ -f "/home/$target_user/.proton/current/proton" ] && echo "Proton installed" || echo "Proton installation failed"
+[ -f "/home/$target_user/.wine-battlenet/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe" ] && echo "Battle.net installed" || echo "Battle.net installation may have failed (check manually)"
+[ -f "/home/$target_user/.wine-ea/pfx/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe" ] && echo "EA App installed" || echo "EA App installation may have failed (check manually)"
+[ -f "/home/$target_user/.wine-epic/pfx/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win32/EpicGamesLauncher.exe" ] && echo "Epic Games Launcher installed" || echo "Epic Games Launcher installation may have failed (check manually)"
 echo "Installation and configuration complete!" | tee -a "$LOG_FILE"
 echo "Please log out and log back in for group changes (e.g., docker group) to take effect."
 echo "You may need to reboot for NVIDIA driver changes to take effect."
-echo "To run Battle.net, use: WINEPREFIX=~/.wine-battlenet wine '~/.wine-battlenet/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe'"
-echo "To run EA App, use: WINEPREFIX=~/.wine-ea wine '~/.wine-ea/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe'"
-echo "To run Epic Games Launcher, use: WINEPREFIX=~/.wine-epic wine '~/.wine-epic/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe'"
+echo ""
+echo "=== Gaming Launcher Usage ==="
+if [ "$INSTALL_BATTLENET" = "true" ] || [ "$INSTALL_EA" = "true" ] || [ "$INSTALL_EPIC" = "true" ]; then
+  echo "Launcher scripts have been created on your Desktop and in ~/bin/"
+  echo ""
+  if [ "$INSTALL_BATTLENET" = "true" ]; then
+    echo "Battle.net: ~/Desktop/battlenet.sh or 'battlenet.sh' (if ~/bin is in PATH)"
+  fi
+  if [ "$INSTALL_EA" = "true" ]; then
+    echo "EA App: ~/Desktop/ea-app.sh or 'ea-app.sh' (if ~/bin is in PATH)"
+  fi
+  if [ "$INSTALL_EPIC" = "true" ]; then
+    echo "Epic Games: ~/Desktop/epic-games.sh or 'epic-games.sh' (if ~/bin is in PATH)"
+  fi
+  echo ""
+  echo "Gaming utilities: ~/Desktop/gaming-utils.sh"
+  echo "  Usage examples:"
+  echo "    ./gaming-utils.sh launch battlenet"
+  echo "    ./gaming-utils.sh config ea"
+  echo "    ./gaming-utils.sh winetricks epic"
+  echo "    ./gaming-utils.sh help"
+  echo ""
+fi
+echo "Manual launcher commands (if scripts don't work):"
+echo "To run Battle.net, use: STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-battlenet WINEPREFIX=~/.wine-battlenet/pfx ~/.proton/current/files/bin/wine '~/.wine-battlenet/pfx/drive_c/Program Files (x86)/Battle.net/Battle.net Launcher.exe'"
+echo "To run EA App, use: STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-ea WINEPREFIX=~/.wine-ea/pfx ~/.proton/current/files/bin/wine '~/.wine-ea/pfx/drive_c/Program Files/Electronic Arts/EA Desktop/EA Desktop/EADesktop.exe'"
+echo "To run Epic Games Launcher, use: STEAM_COMPAT_CLIENT_INSTALL_PATH=~/.steam STEAM_COMPAT_DATA_PATH=~/.wine-epic WINEPREFIX=~/.wine-epic/pfx ~/.proton/current/files/bin/wine '~/.wine-epic/pfx/drive_c/Program Files (x86)/Epic Games/Launcher/Portal/Binaries/Win32/EpicGamesLauncher.exe'"
+echo ""
 echo "After installation, you can install games via Battle.net, EA App, or Epic Games Launcher."
 echo "Log file: $LOG_FILE"
